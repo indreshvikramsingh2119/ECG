@@ -2,12 +2,13 @@ import serial
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+import re
 
 # Parameters
-port = "COM5"  # Replace with the actual port of your device
-baud_rate = 9600  # Adjust according to your device's specifications
-buffer_size = 100  # Number of data points to display on the graph
-
+port = "COM8"
+baud_rate = 9600
+buffer_size = 1000  # Number of data points to display on the graph
+ 
 # Initialize serial connection
 try:
     ser = serial.Serial(
@@ -21,60 +22,54 @@ except serial.SerialException as e:
     exit()
 
 # Data buffer
-data_buffer = np.full(buffer_size, np.nan)  # Initialize with NaN for plotting gaps
+data_buffer = [0] * buffer_size  # Start with zeros for smooth scrolling
 
 # Initialize the plot
 fig, ax = plt.subplots()
-line, = ax.plot([], [], label="ECG Wave", lw=2)
-ax.set_title("Real-Time ECG Plot")
-ax.set_xlabel("Time")
+line, = ax.plot(range(buffer_size), data_buffer, label="ECG Wave", lw=2)
+ax.set_title("Real-Time ECG Data")
+ax.set_xlabel("Samples")
 ax.set_ylabel("Amplitude")
-ax.set_ylim(0, 1024)  # Adjust based on your device's data range
+ax.set_xlim(0, buffer_size)
+ax.set_ylim(0, 255)  # Adjust if your ECG values are outside this range
 ax.legend()
 
-# Function to handle non-numeric data
 def handle_non_numeric(data_buffer):
-    # Replace NaN with the average of the last valid values
-    valid_values = data_buffer[~np.isnan(data_buffer)]
-    if valid_values.size > 0:
-        return np.mean(valid_values)  # Replace with the mean of valid values
-    else:
-        return 0  # Default to zero if no valid data is available
+    valid_values = [v for v in data_buffer if not np.isnan(v)]
+    return np.mean(valid_values) if valid_values else 0
 
-# Function to update the graph
 def update(frame):
     global data_buffer
     try:
-        # Read data from the serial port
         raw_bytes = ser.readline()
         line_data = raw_bytes.decode('utf-8', errors='replace').strip()
-
-        # Display raw bytes and decoded data
         print(f"Raw bytes: {raw_bytes}")
         print(f"Decoded data: '{line_data}'")
 
-        if line_data.isnumeric():
-            value = int(line_data)
+        # Extract the number after the colon (e.g., X:43 -> 43)
+        match = re.search(r":(\d+)", line_data)
+        if match:
+            value = int(match.group(1))
+            print(f"Plotted value: {value}")
         else:
-            print(f"Non-numeric data received: '{line_data}'")
-            value = handle_non_numeric(data_buffer)  # Process non-numeric data
+            print(f"No numeric value found in: '{line_data}'")
+            value = handle_non_numeric(data_buffer)
 
-        # Update the buffer
-        data_buffer = np.roll(data_buffer, -1)
-        data_buffer[-1] = value
+        # Update the buffer (rolling window)
+        data_buffer.append(value)
+        if len(data_buffer) > buffer_size:
+            data_buffer.pop(0)
 
+        # Update plot data
+        line.set_data(range(buffer_size), data_buffer)
+        # Optionally auto-scale y-axis for ECG-like effect:
+        ax.set_ylim(min(data_buffer) - 10, max(data_buffer) + 10)
     except Exception as e:
         print(f"Error reading data: {e}")
-
-    # Update the plot
-    line.set_data(np.arange(len(data_buffer)), data_buffer)
-    ax.set_xlim(0, len(data_buffer))
-    if not np.all(np.isnan(data_buffer)):  # Adjust y-axis only if there's valid data
-        ax.set_ylim(np.nanmin(data_buffer) - 10, np.nanmax(data_buffer) + 10)
     return line,
 
 # Animation setup
-ani = FuncAnimation(fig, update, interval=500)
+ani = FuncAnimation(fig, update, interval=20)  # 20ms = 50Hz update rate
 
 # Display the plot
 try:
@@ -82,6 +77,5 @@ try:
 except KeyboardInterrupt:
     print("Plotting stopped.")
 
-# Cleanup
 ser.close()
 print("Serial connection closed.")
