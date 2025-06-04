@@ -1,82 +1,71 @@
-import serial
-import serial.tools.list_ports
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-import re
+import sys
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QGridLayout, QLineEdit
+from PyQt5.QtCore import QTimer
 
-# List available COM ports
-ports = list(serial.tools.list_ports.comports())
-if not ports:
-    print("No COM ports found. Please connect your device and try again.")
-    exit()
+class SerialSimulation(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        self.init_simulation()
 
-print("Available COM ports:")
-for port in ports:
-    print(f"  {port.device}")
+    def init_ui(self):
+        self.setWindowTitle("Serial Data Simulation")
+        self.setGeometry(200, 200, 400, 300)
 
-# Configure your port (update if needed)
-port_name = input("Enter the COM port to use (e.g., COM5): ").strip()
-baud_rate = 9600
+        # Create layout
+        self.layout = QVBoxLayout()
+        self.grid_layout = QGridLayout()
 
-# Initialize serial connection
-try:
-    ser = serial.Serial(port_name, baud_rate, timeout=1)
-    print(f"Serial port {port_name} opened successfully.")
-except serial.SerialException as e:
-    print(f"Error opening {port_name}: {e}")
-    exit()
+        # Create labels for data
+        self.labels = {}
+        for index, label_name in enumerate(['A', 'B', 'C', 'D', 'E', 'F']):
+            label = QLabel(f"{label_name}: ")
+            value = QLineEdit("0")
+            value.setReadOnly(True)
+            self.grid_layout.addWidget(label, index, 0)
+            self.grid_layout.addWidget(value, index, 1)
+            self.labels[label_name] = value
 
-# Data buffer
-ecg_data = []
+        self.layout.addLayout(self.grid_layout)
+        self.setLayout(self.layout)
 
-# Plot setup
-fig, ax = plt.subplots()
-line, = ax.plot([], [], lw=2, label="ECG Wave")
-ax.set_xlim(0, 100)  # Show last 100 samples
-ax.set_ylim(-500, 500)  # Adjust based on expected data range
-ax.set_title("Live ECG Plot")
-ax.set_xlabel("Samples")
-ax.set_ylabel("Amplitude")
-ax.legend()
+    def init_simulation(self):
+        # Simulation variables
+        self.counter = 1
+        self.increment = 1
 
-# Update function for animation
-def update(frame):
-    global ecg_data
-    if ser.in_waiting > 0:
-        try:
-            raw_line = ser.readline().decode(errors="ignore").strip()
-            print(f"Raw data received: '{raw_line}'")  # Debugging log
+        # Timer for simulation
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_values)
+        self.timer.start(100)  # Simulate 100ms delay
 
-            # Find all numbers in the line
-            numbers = re.findall(r"\d+", raw_line)
-            print(f"Numbers found: {numbers}")  # Add this line
-            if numbers:
-                value = int(max(numbers, key=len))
-                print(f"Value used for plot: {value}")  # Add this line
-                ecg_data.append(value)
-                if len(ecg_data) > 100:
-                    ecg_data.pop(0)
-                line.set_data(range(len(ecg_data)), ecg_data)
-                ax.set_xlim(0, max(100, len(ecg_data)))
-                ax.set_ylim(min(ecg_data) - 20, max(ecg_data) + 20)
-        except Exception as e:
-            print(f"Error reading or processing data: {e}")
-    else:
-        print("No data available in serial buffer.")
-    return line,
+    def update_values(self):
+        # Calculate values
+        A = self.counter
+        B = 101 - A
+        C = A * 2
+        D = 200 - (2 * A)
+        E = A * 3
+        F = 300 - (3 * A)
 
-# Animation setup
-ani = FuncAnimation(fig, update, blit=True, interval=20)
+        # Update the GUI
+        self.labels['A'].setText(str(A))
+        self.labels['B'].setText(str(B))
+        self.labels['C'].setText(str(C))
+        self.labels['D'].setText(str(D))
+        self.labels['E'].setText(str(E))
+        self.labels['F'].setText(str(F))
 
-try:
-    plt.show()
-finally:
-    # Clean up
-    ser.close()
-    print(f"Serial port {port_name} closed.")
+        # Adjust counter for up and down behavior
+        if self.counter >= 100:
+            self.increment = -1
+        elif self.counter <= 1:
+            self.increment = 1
 
-import serial
+        self.counter += self.increment
 
-ser = serial.Serial('COM5', 9600, timeout=2)
-while True:
-    print(ser.readline().decode(errors="ignore").strip())
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = SerialSimulation()
+    window.show()
+    sys.exit(app.exec_())
