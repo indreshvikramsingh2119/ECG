@@ -5,7 +5,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 # Name of the script to watch and restart
-SCRIPT_NAME = "new.py"
+SCRIPT_NAME = "terminal.py"
 
 class Watcher(FileSystemEventHandler):
     def __init__(self):

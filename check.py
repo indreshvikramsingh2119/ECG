@@ -3,7 +3,7 @@ import threading
 import time
 
 # Parameters
-PORT = "COM8"  # Replace with your device's port
+PORT = "COM5"  # Replace with your device's port
 BAUD_RATE =9600 #eplace with your device's baud rate
 RUNNING = False  # Global flag to control data reception
 

@@ -1,81 +1,66 @@
 import serial
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+import numpy as np
 import re
 
-# Parameters
-port = "COM8"
+# Serial config
+port = "COM5"
 baud_rate = 9600
-buffer_size = 1000  # Number of data points to display on the graph
- 
-# Initialize serial connection
-try:
-    ser = serial.Serial(
-        port, baud_rate,
-        bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE,
-        stopbits=serial.STOPBITS_ONE, timeout=1
-    )
-    print(f"Connected to {port} at {baud_rate} baud")
-except serial.SerialException as e:
-    print(f"Error: {e}")
-    exit()
+timeout = 1
 
-# Data buffer
-data_buffer = [0] * buffer_size  # Start with zeros for smooth scrolling
+# Open serial port
+ser = serial.Serial(port, baud_rate, timeout=timeout, parity=serial.PARITY_NONE, bytesize=serial.EIGHTBITS)
+print(f"Connected to {port} at {baud_rate} baud.")
 
-# Initialize the plot
+# Send '1' to start data transmission
+ser.write(b'1\r\n')
+print("Sent start command ('1') to device.")
+
+# Data buffer for plotting
+buffer_size = 200
+data_buffer = [0] * buffer_size
+
+# Plot setup
 fig, ax = plt.subplots()
-line, = ax.plot(range(buffer_size), data_buffer, label="ECG Wave", lw=2)
-ax.set_title("Real-Time ECG Data")
+line, = ax.plot(data_buffer, color='r', lw=2)
+ax.set_title("Real-Time ECG")
 ax.set_xlabel("Samples")
 ax.set_ylabel("Amplitude")
 ax.set_xlim(0, buffer_size)
-ax.set_ylim(0, 255)  # Adjust if your ECG values are outside this range
-ax.legend()
+ax.set_ylim(0, 1200000)  # Adjust if needed
 
-def handle_non_numeric(data_buffer):
-    valid_values = [v for v in data_buffer if not np.isnan(v)]
-    return np.mean(valid_values) if valid_values else 0
+# ECG-style grid
+ax.set_facecolor('#fff0f5')
+ax.grid(which='major', color='r', linestyle='-', linewidth=0.5, alpha=0.5)
+ax.grid(which='minor', color='k', linestyle=':', linewidth=0.3, alpha=0.3)
+ax.minorticks_on()
+ax.xaxis.set_major_locator(plt.MultipleLocator(50))
+ax.xaxis.set_minor_locator(plt.MultipleLocator(10))
+ax.yaxis.set_major_locator(plt.MultipleLocator(200000))
+ax.yaxis.set_minor_locator(plt.MultipleLocator(50000))
 
 def update(frame):
-    global data_buffer
     try:
-        raw_bytes = ser.readline()
-        line_data = raw_bytes.decode('utf-8', errors='replace').strip()
-        print(f"Raw bytes: {raw_bytes}")
-        print(f"Decoded data: '{line_data}'")
-
-        # Extract the number after the colon (e.g., X:43 -> 43)
-        match = re.search(r":(\d+)", line_data)
-        if match:
-            value = int(match.group(1))
-            print(f"Plotted value: {value}")
-        else:
-            print(f"No numeric value found in: '{line_data}'")
-            value = handle_non_numeric(data_buffer)
-
-        # Update the buffer (rolling window)
-        data_buffer.append(value)
-        if len(data_buffer) > buffer_size:
-            data_buffer.pop(0)
-
-        # Update plot data
-        line.set_data(range(buffer_size), data_buffer)
-        # Optionally auto-scale y-axis for ECG-like effect:
-        ax.set_ylim(min(data_buffer) - 10, max(data_buffer) + 10)
+        raw = ser.readline()
+        line_data = raw.decode(errors='replace').strip()
+        print(f"Received: {line_data}")  # <-- Show every line on terminal
+        # Only plot lines that are all digits (ignore RH:... lines)
+        if line_data.isdigit():
+            value = int(line_data)
+            data_buffer.append(value)
+            if len(data_buffer) > buffer_size:
+                data_buffer.pop(0)
+            line.set_data(range(buffer_size), data_buffer)
+            ax.set_ylim(min(data_buffer) - 10000, max(data_buffer) + 10000)
     except Exception as e:
-        print(f"Error reading data: {e}")
+        print(f"Error: {e}")
     return line,
 
-# Animation setup
-ani = FuncAnimation(fig, update, interval=20)  # 20ms = 50Hz update rate
+ani = FuncAnimation(fig, update, interval=20)
+plt.show()
 
-# Display the plot
-try:
-    plt.show()
-except KeyboardInterrupt:
-    print("Plotting stopped.")
-
+# On close, send '0' to stop and close port
+ser.write(b'0\r\n')
 ser.close()
-print("Serial connection closed.")
+print("Serial port closed.")

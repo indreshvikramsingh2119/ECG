@@ -1,0 +1,1 @@
+ax.set_ylim(min(data_buffer) - 10000, max(data_buffer) + 10000)
