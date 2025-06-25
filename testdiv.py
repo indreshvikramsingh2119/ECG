@@ -333,6 +333,11 @@ class ECGTestPage(QWidget):
                 if widget:
                     widget.setParent(None)
             self.plot_area.setLayout(None)
+        # Clear old lists
+        self.figures = []
+        self.canvases = []
+        self.axs = []
+        self.lines = []
         # Create grid layout
         grid = QGridLayout()
         self.figures = []
@@ -395,24 +400,72 @@ class ECGTestPage(QWidget):
     def update_plot(self):
         if not self.serial_reader:
             return
-        value = self.serial_reader.read_value()
-        if value is not None:
+        line = self.serial_reader.ser.readline()
+        line_data = line.decode('utf-8', errors='replace').strip()
+        if not line_data:
+            return
+
+        # Print the raw received data to the terminal
+        print("Received:", line_data)
+
+        # Split the incoming string into values (assuming space-separated)
+        try:
+            values = [int(x) for x in line_data.split()]
+            if len(values) != 8:
+                return  # Not enough data, skip this frame
+
+            # Map values to leads
+            lead1 = values[0]
+            v4    = values[1]
+            v5    = values[2]
+            lead2 = values[3]
+            v3    = values[4]
+            v6    = values[5]
+            v1    = values[6]
+            v2    = values[7]
+
+            # Calculate derived leads
+            lead3 = lead2 - lead1
+            avr = - (lead1 + lead2) / 2
+            avl = (lead1 - lead3) / 2
+            avf = (lead2 + lead3) / 2
+
+            # Assign all 12 leads
+            lead_data = {
+                "I": lead1,
+                "II": lead2,
+                "III": lead3,
+                "aVR": avr,
+                "aVL": avl,
+                "aVF": avf,
+                "V1": v1,
+                "V2": v2,
+                "V3": v3,
+                "V4": v4,
+                "V5": v5,
+                "V6": v6
+            }
+
+            # Append to buffers and plot
             for i, lead in enumerate(self.leads):
-                v = value + i*100  # For demo, offset each lead
-                self.data[lead].append(v)
+                self.data[lead].append(lead_data[lead])
                 if len(self.data[lead]) > self.buffer_size:
                     self.data[lead].pop(0)
-        for i, lead in enumerate(self.leads):
-            if len(self.data[lead]) > 0:
-                if len(self.data[lead]) < self.buffer_size:
-                    pad = [self.data[lead][0]] * (self.buffer_size - len(self.data[lead]))
-                    data = pad + self.data[lead]
-                else:
-                    data = self.data[lead]
-                centered = np.array(data) - np.mean(data)
-                self.lines[i].set_ydata(centered)
-                self.axs[i].set_ylim(-400, 400)
-                self.canvases[i].draw_idle()
+
+            # Plot as before
+            for i, lead in enumerate(self.leads):
+                if len(self.data[lead]) > 0:
+                    if len(self.data[lead]) < self.buffer_size:
+                        pad = [self.data[lead][0]] * (self.buffer_size - len(self.data[lead]))
+                        data = pad + self.data[lead]
+                    else:
+                        data = self.data[lead]
+                    centered = np.array(data) - np.mean(data)
+                    self.lines[i].set_ydata(centered)
+                    self.axs[i].set_ylim(-400, 400)
+                    self.canvases[i].draw_idle()
+        except Exception as e:
+            print("Error parsing ECG data:", e)
 
     def export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export ECG Data as PDF", "", "PDF Files (*.pdf)")
@@ -515,34 +568,15 @@ class LeadSettingsDialog(QDialog):
             return None, None
 
     def expand_lead(self, idx):
-        import matplotlib.pyplot as plt
-        import numpy as np
-
         lead = self.leads[idx]
-        data = np.array(self.data[lead]) - np.mean(self.data[lead])  # Centered
-
-        # Default settings
-        default_ylim = (-400, 400)
-        default_color = "#00ff99"
-
-        # Show settings dialog
-        dlg = LeadSettingsDialog(self, current_ylim=default_ylim, current_color=default_color)
-        if dlg.exec_() == QDialog.Accepted:
-            ylim, color = dlg.get_settings()
-            if ylim is None or color is None:
-                ylim = default_ylim
-                color = default_color
-        else:
-            return  # Cancelled
-
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(data, color=color, lw=2)
-        ax.set_title(f"Enlarged View: {lead}")
-        ax.set_facecolor('#000')
-        ax.set_ylim(*ylim)
-        ax.set_xlim(0, len(data))
-        ax.grid(True, color='gray', alpha=0.3)
-        plt.show()
+        def get_lead_data():
+            return self.data[lead]
+        win = LiveLeadWindow(lead, get_lead_data, buffer_size=self.buffer_size)
+        win.show()
+        # Keep a reference so it doesn't get garbage collected
+        if not hasattr(self, "_live_windows"):
+            self._live_windows = []
+        self._live_windows.append(win)
 
 # --- Main Menu ---
 class MainMenu(QWidget):
@@ -803,3 +837,60 @@ def run_ecg_live_plot(port='/cu.usbserial-10', baudrate=9600, buffer_size=100):
     airflow = np.array([...])  # your data
     centered = airflow - np.mean(airflow)
     plt.plot(centered)
+
+    # --- Derived Leads Calculation ---
+lead3 = lead2 - lead1
+avr = - (lead1 + lead2) / 2
+avl = (lead1 - lead3) / 2
+avf = (lead2 + lead3) / 2
+
+lead_data = {
+    "I": lead1,
+    "II": lead2,
+    "III": lead3,
+    "aVR": avr,
+    "aVL": avl,
+    "aVF": avf,
+    "V1": v1,
+    "V2": v2,
+    "V3": v3,
+    "V4": v4,
+    "V5": v5,
+    "V6": v6
+}
+
+import threading
+
+class LiveLeadWindow(QWidget):
+    def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
+        super().__init__()
+        self.setWindowTitle(f"Live View: {lead_name}")
+        self.resize(900, 300)
+        self.lead_name = lead_name
+        self.data_source = data_source  # Should be a callable returning the latest buffer for this lead
+        self.buffer_size = buffer_size
+        self.color = color
+
+        layout = QVBoxLayout(self)
+        self.fig = Figure(facecolor='#000')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_facecolor('#000')
+        self.ax.set_ylim(-400, 400)
+        self.ax.set_xlim(0, buffer_size)
+        self.line, = self.ax.plot([0]*buffer_size, color=self.color, lw=2)
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(100)  # 10 FPS instead of 20
+
+    def update_plot(self):
+        data = self.data_source()
+        if data and len(data) > 0:
+            if len(data) < self.buffer_size:
+                pad = [data[0]] * (self.buffer_size - len(data))
+                data = pad + data
+            centered = np.array(data) - np.mean(data)
+            self.line.set_ydata(centered)
+            self.canvas.draw_idle()
