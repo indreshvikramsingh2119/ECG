@@ -1,6 +1,10 @@
 import requests
+import os
+from dotenv import load_dotenv
 
-FIREBASE_API_KEY = "AIzaSyBj5fq2pVAk7SyLH3sgnjKNQaQT3iPsNJU"  # <-- Replace this
+load_dotenv()
+
+FIREBASE_API_KEY = os.getenv('GOOGLE_API')  # <-- Replace this
 
 def sign_up(email, password):
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_API_KEY}"
