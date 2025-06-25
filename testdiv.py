@@ -4,10 +4,10 @@ import serial.tools.list_ports
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QGroupBox, QFileDialog, QStackedWidget, QGridLayout, QSizePolicy,
-    QDialog, QLineEdit, QFormLayout, QMessageBox
+    QDialog, QLineEdit, QFormLayout, QMessageBox, QInputDialog
 )
-from PyQt5.QtGui import QPixmap, QFont, QMovie
-from PyQt5.QtCore import Qt, QTimer, QSize
+from PyQt5.QtGui import QPixmap, QFont, QMovie, QRegExpValidator, QPainter, QPainterPath
+from PyQt5.QtCore import Qt, QTimer, QSize, QRegExp
 from PyQt5.QtWidgets import QGraphicsBlurEffect
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -17,6 +17,8 @@ from matplotlib.widgets import Button
 import numpy as np
 from db_data import init_db, save_user
 from firebase_auth import sign_up, sign_in
+import webbrowser
+import requests
 
 init_db()  # Initialize the database
 
@@ -24,7 +26,7 @@ class AuthDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Guest Login")
-        self.setFixedSize(400, 350)
+        self.setFixedSize(750, 750)
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #000, stop:1 #00ff99);
@@ -75,18 +77,96 @@ class AuthDialog(QDialog):
         title.setFont(QFont("Arial", 22, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
+        
+        self.avatar_label = QLabel()
+        self.avatar_label.setFixedSize(100, 100)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet("""
+            QLabel {
+                border-radius: 40px;
+                border: 3px solid #00ff99;
+                background: #222;
+            }
+        """)
+        # Set a blank/default avatar (empty circle)
+        blank_pixmap = QPixmap(100, 100)
+        blank_pixmap.fill(Qt.transparent)
+        self.avatar_label.setPixmap(blank_pixmap)
+        self.avatar_label.setCursor(Qt.PointingHandCursor)
+        self.avatar_label.mousePressEvent = self.upload_profile_pic  # Make avatar clickable
+        
+        # Set default avatar from URL
+        try:
+            url = "https://img1.pnghut.com/1/25/23/T3q5NKrnTX/black-and-white-monochrome-alphanumeric-button-number.jpg"
+            response = requests.get(url)
+            if response.status_code == 200:
+                image_data = response.content
+                pixmap = QPixmap()
+                pixmap.loadFromData(image_data)
+                # Crop to square (centered)
+                size = min(pixmap.width(), pixmap.height())
+                x = (pixmap.width() - size) // 2
+                y = (pixmap.height() - size) // 2
+                square = pixmap.copy(x, y, size, size)
+                # Scale to fit avatar
+                square = square.scaled(100, 100, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                # Make it circular
+                final_pixmap = QPixmap(100, 100)
+                final_pixmap.fill(Qt.transparent)
+                painter = QPainter(final_pixmap)
+                painter.setRenderHint(QPainter.Antialiasing)
+                path = QPainterPath()
+                path.addEllipse(0, 0, 100, 100)
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, square)
+                painter.end()
+                self.avatar_label.setPixmap(final_pixmap)
+            else:
+                blank_pixmap = QPixmap(100, 100)
+                blank_pixmap.fill(Qt.transparent)
+                self.avatar_label.setPixmap(blank_pixmap)
+        except Exception as e:
+            print("Avatar image download failed:", e)
+            blank_pixmap = QPixmap(100, 100)
+            blank_pixmap.fill(Qt.transparent)
+            self.avatar_label.setPixmap(blank_pixmap)
+
+        layout.addWidget(self.avatar_label, alignment=Qt.AlignCenter)
 
         # Form fields
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
+        form.setVerticalSpacing(16)
         self.email = QLineEdit()
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        self.password2 = QLineEdit()
+        self.password2.setEchoMode(QLineEdit.Password)
         form.addRow("Email:", self.email)
         form.addRow("Password:", self.password)
 
         self.name = QLineEdit()
         self.name_row_added = False
+        
+        # Country code combo
+        self.country_code = QComboBox()
+        self.country_code.addItems([
+            "+91 (India)", "+1 (USA)", "+44 (UK)", "+61 (Australia)", "+81 (Japan)", "+49 (Germany)", "+86 (China)", "+971 (UAE)"
+        ])
+        self.country_code.setFixedWidth(130)
+        
+        # Phone number field (digits only)
+        self.phone = QLineEdit()
+        self.phone.setPlaceholderText("Phone Number")
+        digit_validator = QRegExpValidator(QRegExp(r'^\d{0,15}$'))  # Up to 15 digits, digits only
+        self.phone.setValidator(digit_validator)
+        self.age = QLineEdit()
+        self.age.setPlaceholderText("Age")
+        self.gender = QComboBox()
+        self.gender.addItems(["M", "F", "Not Applicable"])
+        self.address = QLineEdit()
+        self.address.setPlaceholderText("Address")
+        self.profile_pic_path = None
 
         form_widget = QWidget()
         form_widget.setLayout(form)
@@ -105,6 +185,14 @@ class AuthDialog(QDialog):
 
         self.is_signup = False
         self.form = form
+        
+    def create_phone_widget(self):
+        phone_row = QHBoxLayout()
+        phone_row.addWidget(self.country_code)
+        phone_row.addWidget(self.phone)
+        phone_widget = QWidget()
+        phone_widget.setLayout(phone_row)
+        return phone_widget
 
     def toggle_mode(self):
         self.is_signup = not self.is_signup
@@ -114,28 +202,132 @@ class AuthDialog(QDialog):
             self.switch_btn.setText("Already Registered?")
             if not self.name_row_added:
                 self.form.insertRow(1, "Name:", self.name)
+                
+                phone_row = QHBoxLayout()
+                phone_row.addWidget(self.country_code)
+                phone_row.addWidget(self.phone)
+                phone_widget = QWidget()
+                phone_widget.setLayout(phone_row)
+
+                self.form.insertRow(2, "Phone:", self.create_phone_widget())
+                
+                self.form.insertRow(3, "Age:", self.age)
+                self.form.insertRow(4, "Gender:", self.gender)
+                self.form.insertRow(5, "Address:", self.address)
+                self.form.insertRow(7, "Confirm Password:", self.password2)
                 self.name_row_added = True
         else:
             self.setWindowTitle("Guest Login")
             self.action_btn.setText("Sign In")
             self.switch_btn.setText("Register User?")
             if self.name_row_added:
-                self.form.removeRow(1)
+                for _ in range(6):
+                    self.form.removeRow(1)
                 self.name_row_added = False
+                
+    def upload_profile_pic(self, event=None):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg)")
+        if path:
+            self.profile_pic_path = path
+            pixmap = QPixmap(path)
+            # Crop to square (centered)
+            size = min(pixmap.width(), pixmap.height())
+            x = (pixmap.width() - size) // 2
+            y = (pixmap.height() - size) // 2
+            square = pixmap.copy(x, y, size, size)
+            # Scale to fit avatar
+            square = square.scaled(100, 100, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            # Make it circular
+            final_pixmap = QPixmap(100, 100)
+            final_pixmap.fill(Qt.transparent)
+            painter = QPainter(final_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, 100, 100)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, square)
+            painter.end()
+            self.avatar_label.setPixmap(final_pixmap)
+            
+    def google_sign_in(self):
+        # Your Google OAuth 2.0 client info (from Google Cloud Console)
+        CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
+        REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
+        SCOPE = "openid email profile"
+        AUTH_URL = (
+            f"https://accounts.google.com/o/oauth2/v2/auth"
+            f"?client_id={CLIENT_ID}"
+            f"&redirect_uri={REDIRECT_URI}"
+            f"&response_type=code"
+            f"&scope={SCOPE}"
+        )
+
+        # Open browser for user to sign in
+        webbrowser.open(AUTH_URL)
+        # Ask user to paste the code
+        code, ok = QInputDialog.getText(self, "Google Sign-In", "Paste the code from browser here:")
+        if not ok or not code:
+            return
+
+        # Exchange code for tokens
+        token_url = "https://oauth2.googleapis.com/token"
+        data = {
+            "code": code,
+            "client_id": CLIENT_ID,
+            "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
+            "redirect_uri": REDIRECT_URI,
+            "grant_type": "authorization_code"
+        }
+        resp = requests.post(token_url, data=data)
+        if resp.status_code != 200:
+            QMessageBox.warning(self, "Error", "Failed to get token from Google.")
+            return
+        tokens = resp.json()
+        id_token = tokens.get("id_token")
+
+        # Get user info from id_token (JWT)
+        userinfo = requests.get(
+            f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={id_token}"
+        ).json()
+        email = userinfo.get("email")
+        name = userinfo.get("name")
+        uid = userinfo.get("sub")
+
+        # Save to your local DB
+        from db_data import save_user
+        save_user(uid, email, name)
+        QMessageBox.information(self, "Success", f"Signed in as {name} ({email})")
+        self.accept()
 
     def handle_auth(self):
         email = self.email.text().strip()
         password = self.password.text().strip()
         if self.is_signup:
+            password2 = self.password2.text().strip()
+            if password != password2:
+                QMessageBox.warning(self, "Error", "Passwords do not match!")
+                return
             name = self.name.text().strip()
-            if not name:
-                QMessageBox.warning(self, "Error", "Please enter your name.")
+            country_code = self.country_code.currentText().split()[0]  # e.g., "+91"
+            phone = self.phone.text().strip()
+            full_phone = f"{country_code}{phone}"
+            age = self.age.text().strip()
+            gender = self.gender.currentText()
+            address = self.address.text().strip()
+            profile_pic = self.profile_pic_path
+            if not name or not phone or not age or not address:
+                QMessageBox.warning(self, "Error", "Please fill all fields.")
                 return
             result = sign_up(email, password)
             if "error" in result:
                 QMessageBox.warning(self, "Error", result["error"]["message"])
             else:
-                save_user(result["localId"], email, name)
+                # Save user with all details
+                save_user(
+                    result["localId"], email, name,
+                    phone=full_phone, age=age, gender=gender, address=address, profile_pic=profile_pic
+                )
+                self.logged_in_name = name
                 QMessageBox.information(self, "Success", "Sign Up successful!")
                 self.accept()
         else:
@@ -143,6 +335,10 @@ class AuthDialog(QDialog):
             if "error" in result:
                 QMessageBox.warning(self, "Error", result["error"]["message"])
             else:
+                # You may want to fetch the user's name from your DB here
+                from db_data import get_user_by_email
+                user = get_user_by_email(email)
+                self.logged_in_name = user[3] if user else email  # user[3] is name
                 QMessageBox.information(self, "Success", "Sign In successful!")
                 self.accept()
 
@@ -672,18 +868,25 @@ class MainMenu(QWidget):
         overlay_layout.addWidget(logo_label)
 
         # --- Title ---
-        title = QLabel("PulseMonitorX")
-        title.setFont(QFont("Arial", 36, QFont.Bold))
-        title.setStyleSheet("color: #00ff99; background: transparent; letter-spacing: 2px;")
-        title.setAlignment(Qt.AlignCenter)
-        overlay_layout.addWidget(title)
+        self.title_label = QLabel("PulseMonitorX")
+        self.title_label.setFont(QFont("Arial", 36, QFont.Bold))
+        self.title_label.setStyleSheet("color: #00ff99; background: transparent; letter-spacing: 2px;")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        overlay_layout.addWidget(self.title_label)
+        
+        # ---  User name display 
+        self.user_label = QLabel("")
+        self.user_label.setFont(QFont("Arial", 20, QFont.Bold))
+        self.user_label.setStyleSheet("color: #000; background: transparent;")
+        self.user_label.setAlignment(Qt.AlignCenter)
+        overlay_layout.addWidget(self.user_label)
 
         # --- Guest Login Button ---
-        guest_btn = QPushButton("Guest Login")
-        guest_btn.setMinimumHeight(48)
-        guest_btn.setFont(QFont("Arial", 16, QFont.Bold))
-        guest_btn.setCursor(Qt.PointingHandCursor)
-        guest_btn.setStyleSheet("""
+        self.guest_btn = QPushButton("Guest Login")
+        self.guest_btn.setMinimumHeight(48)
+        self.guest_btn.setFont(QFont("Arial", 16, QFont.Bold))
+        self.guest_btn.setCursor(Qt.PointingHandCursor)
+        self.guest_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #fff, stop:1 #00ff99);
                 color: #00b894;
@@ -700,9 +903,39 @@ class MainMenu(QWidget):
                 border: 2px solid #fff;
             }
         """)
-        guest_btn.clicked.connect(lambda: AuthDialog().exec_())
-        overlay_layout.addWidget(guest_btn)
+        self.guest_btn.clicked.connect(self.show_auth_dialog)
+        overlay_layout.addWidget(self.guest_btn)
         overlay_layout.addSpacing(30)
+        
+        # --- Sign Out Button ---
+        self.signout_btn = QPushButton("Sign Out")
+        self.signout_btn.setFont(QFont("Arial", 14, QFont.Bold))
+        self.signout_btn.setStyleSheet("""
+            QPushButton {
+                background: #fff;
+                color: #00b894;
+                border-radius: 16px;
+                padding: 8px 24px;
+                font-size: 16px;
+                font-weight: bold;
+                border: 2px solid #00ff99;
+            }
+            QPushButton:hover {
+                background: #00ff99;
+                color: #fff;
+                border: 2px solid #fff;
+            }
+        """)
+        self.signout_btn.setCursor(Qt.PointingHandCursor)
+        self.signout_btn.hide()
+        self.signout_btn.clicked.connect(self.sign_out)
+        
+        # --- Sign Out Button centered below user name ---
+        signout_row = QHBoxLayout()
+        signout_row.addStretch(1)
+        signout_row.addWidget(self.signout_btn)
+        signout_row.addStretch(1)
+        overlay_layout.addLayout(signout_row)
 
         # --- Two Square Buttons ---
         btn_grid = QGridLayout()
@@ -753,6 +986,20 @@ class MainMenu(QWidget):
         overlay.setGeometry(0, 0, self.width(), self.height())
         overlay.raise_()
         self.overlay = overlay
+        
+    def show_auth_dialog(self):
+        dlg = AuthDialog()
+        if dlg.exec_() == QDialog.Accepted:
+            user_name = dlg.logged_in_name
+            if user_name:
+                self.user_label.setText(f"Welcome, {user_name}!")
+                self.guest_btn.hide()
+                self.signout_btn.show()
+                
+    def sign_out(self):
+        self.user_label.setText("")
+        self.guest_btn.show()
+        self.signout_btn.hide()
 
     def resizeEvent(self, event):
         self.bg_label.setPixmap(self.bg_pixmap.scaled(
