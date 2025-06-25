@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import QGraphicsBlurEffect
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import time
-from ecg_plotter import ECGPlotter
+from PulsemonitorX.ecg_plotter import ECGPlotter
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Button
 import numpy as np

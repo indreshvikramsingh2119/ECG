@@ -179,6 +179,41 @@ class SerialECGReader:
     def close(self):
         self.ser.close()
 
+# --- Live Lead Window ---
+class LiveLeadWindow(QWidget):
+    def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
+        super().__init__()
+        self.setWindowTitle(f"Live View: {lead_name}")
+        self.resize(900, 300)
+        self.lead_name = lead_name
+        self.data_source = data_source  # Should be a callable returning the latest buffer for this lead
+        self.buffer_size = buffer_size
+        self.color = color
+
+        layout = QVBoxLayout(self)
+        self.fig = Figure(facecolor='#000')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_facecolor('#000')
+        self.ax.set_ylim(-400, 400)
+        self.ax.set_xlim(0, buffer_size)
+        self.line, = self.ax.plot([0]*buffer_size, color=self.color, lw=2)
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(100)  # 10 FPS instead of 20
+
+    def update_plot(self):
+        data = self.data_source()
+        if data and len(data) > 0:
+            if len(data) < self.buffer_size:
+                pad = [data[0]] * (self.buffer_size - len(data))
+                data = pad + data
+            centered = np.array(data) - np.mean(data)
+            self.line.set_ydata(centered)
+            self.canvas.draw_idle()
+
 # --- Test Page ---
 class ECGTestPage(QWidget):
     LEADS_MAP = {
@@ -188,6 +223,34 @@ class ECGTestPage(QWidget):
         "12 Lead ECG Test": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
         "ECG Live Monitoring": ["Lead II"]
     }
+
+    LEAD_COLORS = {
+        "I": "#00ff99",
+        "II": "#ff0055",
+        "III": "#0099ff",
+        "aVR": "#ff9900",
+        "aVL": "#cc00ff",
+        "aVF": "#00ccff",
+        "V1": "#ffcc00",
+        "V2": "#00ffcc",
+        "V3": "#ff6600",
+        "V4": "#6600ff",
+        "V5": "#00b894",
+        "V6": "#ff0066"
+    }
+
+    def expand_lead(self, idx):
+        lead = self.leads[idx]
+        def get_lead_data():
+            return self.data[lead]
+        # Assign a color for the lead
+        color = self.LEAD_COLORS.get(lead, "#00ff99")
+        win = LiveLeadWindow(lead, get_lead_data, buffer_size=self.buffer_size, color=color)
+        win.show()
+        # Keep a reference so it doesn't get garbage collected
+        if not hasattr(self, "_live_windows"):
+            self._live_windows = []
+        self._live_windows.append(win)
     def __init__(self, test_name, stacked_widget):
         super().__init__()
         self.test_name = test_name
@@ -511,7 +574,7 @@ class ECGTestPage(QWidget):
         QMessageBox.information(self, "Save ECG", "Save ECG clicked.")
 
     def open_ecg(self):
-        QMessageBox.information(self, "Open ECG", "Open ECG clicked.")
+        QMessageBox.information(self, "Open ECG", "")
 
     def working_mode(self):
         QMessageBox.information(self, "Working Mode", "Working Mode clicked.")
@@ -860,37 +923,3 @@ lead_data = {
 }
 
 import threading
-
-class LiveLeadWindow(QWidget):
-    def __init__(self, lead_name, data_source, buffer_size=80, color="#00ff99"):
-        super().__init__()
-        self.setWindowTitle(f"Live View: {lead_name}")
-        self.resize(900, 300)
-        self.lead_name = lead_name
-        self.data_source = data_source  # Should be a callable returning the latest buffer for this lead
-        self.buffer_size = buffer_size
-        self.color = color
-
-        layout = QVBoxLayout(self)
-        self.fig = Figure(facecolor='#000')
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor('#000')
-        self.ax.set_ylim(-400, 400)
-        self.ax.set_xlim(0, buffer_size)
-        self.line, = self.ax.plot([0]*buffer_size, color=self.color, lw=2)
-        self.canvas = FigureCanvas(self.fig)
-        layout.addWidget(self.canvas)
-
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_plot)
-        self.timer.start(100)  # 10 FPS instead of 20
-
-    def update_plot(self):
-        data = self.data_source()
-        if data and len(data) > 0:
-            if len(data) < self.buffer_size:
-                pad = [data[0]] * (self.buffer_size - len(data))
-                data = pad + data
-            centered = np.array(data) - np.mean(data)
-            self.line.set_ydata(centered)
-            self.canvas.draw_idle()
