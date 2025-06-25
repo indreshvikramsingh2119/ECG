@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QDialog, QLineEdit, QFormLayout, QMessageBox
 )
 from PyQt5.QtGui import QPixmap, QFont, QMovie
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QSize
 from PyQt5.QtWidgets import QGraphicsBlurEffect
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -22,28 +22,89 @@ init_db()  # Initialize the database
 
 class AuthDialog(QDialog):
     def __init__(self):
-
         super().__init__()
         self.setWindowTitle("Guest Login")
-        self.is_signup = False
-        self.layout = QFormLayout(self)
+        self.setFixedSize(400, 350)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #000, stop:1 #00ff99);
+                border-radius: 18px;
+            }
+            QLabel {
+                color: #fff;
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QLineEdit {
+                background: #222;
+                color: #fff;
+                border: 2px solid #00ff99;
+                border-radius: 10px;
+                padding: 8px 12px;
+                font-size: 16px;
+            }
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00ff99, stop:1 #00b894);
+                color: #000;
+                border-radius: 14px;
+                padding: 10px 0;
+                font-size: 18px;
+                font-weight: bold;
+                margin-top: 10px;
+            }
+            QPushButton:hover {
+                background: #fff;
+                color: #00b894;
+                border: 2px solid #00ff99;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+
+        # Optional: Add a logo or icon
+        icon_label = QLabel()
+        icon_pixmap = QPixmap("pulse.png")
+        if not icon_pixmap.isNull():
+            icon_label.setPixmap(icon_pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            icon_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(icon_label)
+
+        # Title
+        title = QLabel("Guest Login")
+        title.setFont(QFont("Arial", 22, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # Form fields
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
         self.email = QLineEdit()
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
-        self.layout.addRow("Email:", self.email)
-        self.layout.addRow("Password:", self.password)
+        form.addRow("Email:", self.email)
+        form.addRow("Password:", self.password)
 
         self.name = QLineEdit()
         self.name_row_added = False
-        # Name field is only shown in sign up mode
 
+        form_widget = QWidget()
+        form_widget.setLayout(form)
+        layout.addWidget(form_widget)
+
+        # Action buttons
         self.action_btn = QPushButton("Sign In")
         self.switch_btn = QPushButton("Register User?")
         self.action_btn.clicked.connect(self.handle_auth)
         self.switch_btn.clicked.connect(self.toggle_mode)
 
-        self.layout.addWidget(self.action_btn)
-        self.layout.addWidget(self.switch_btn)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.action_btn)
+        btn_row.addWidget(self.switch_btn)
+        layout.addLayout(btn_row)
+
+        self.is_signup = False
+        self.form = form
 
     def toggle_mode(self):
         self.is_signup = not self.is_signup
@@ -52,14 +113,14 @@ class AuthDialog(QDialog):
             self.action_btn.setText("Sign Up")
             self.switch_btn.setText("Already Registered?")
             if not self.name_row_added:
-                self.layout.insertRow(2, "Name:", self.name)
+                self.form.insertRow(1, "Name:", self.name)
                 self.name_row_added = True
         else:
             self.setWindowTitle("Guest Login")
             self.action_btn.setText("Sign In")
             self.switch_btn.setText("Register User?")
             if self.name_row_added:
-                self.layout.removeRow(2)
+                self.form.removeRow(1)
                 self.name_row_added = False
 
     def handle_auth(self):
@@ -502,7 +563,7 @@ class MainMenu(QWidget):
         overlay = QWidget(self)
         overlay.setAttribute(Qt.WA_TranslucentBackground)
         overlay_layout = QVBoxLayout(overlay)
-        overlay_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        overlay_layout.setAlignment(Qt.AlignVCenter | Qt.AlignHCenter)
         overlay_layout.setContentsMargins(40, 40, 40, 40)
         overlay.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -516,50 +577,80 @@ class MainMenu(QWidget):
         # --- Title ---
         title = QLabel("PulseMonitorX")
         title.setFont(QFont("Arial", 36, QFont.Bold))
-        title.setStyleSheet("color: #00ff99; background: transparent;")
+        title.setStyleSheet("color: #00ff99; background: transparent; letter-spacing: 2px;")
         title.setAlignment(Qt.AlignCenter)
         overlay_layout.addWidget(title)
 
-        auth_layout = QHBoxLayout()
+        # --- Guest Login Button ---
         guest_btn = QPushButton("Guest Login")
-        auth_layout.addWidget(guest_btn)
-        overlay_layout.addLayout(auth_layout)
-
+        guest_btn.setMinimumHeight(48)
+        guest_btn.setFont(QFont("Arial", 16, QFont.Bold))
+        guest_btn.setCursor(Qt.PointingHandCursor)
+        guest_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #fff, stop:1 #00ff99);
+                color: #00b894;
+                border-radius: 24px;
+                padding: 12px 36px;
+                font-size: 18px;
+                font-weight: bold;
+                border: 2px solid #00ff99;
+                box-shadow: 0px 4px 12px #00ff9955;
+            }
+            QPushButton:hover {
+                background: #00ff99;
+                color: #fff;
+                border: 2px solid #fff;
+            }
+        """)
         guest_btn.clicked.connect(lambda: AuthDialog().exec_())
+        overlay_layout.addWidget(guest_btn)
+        overlay_layout.addSpacing(30)
 
-        # --- Buttons ---
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(20)
+        # --- Two Square Buttons ---
+        btn_grid = QGridLayout()
+        btn_grid.setSpacing(40)
         btn_names = [
-            "Lead II ECG Test",
-            "Lead III ECG Test",
-            "7 Lead ECG Test",
             "12 Lead ECG Test",
             "ECG Live Monitoring"
         ]
         self.buttons = []
-        for name in btn_names:
+        for i, name in enumerate(btn_names):
             btn = QPushButton(name)
-            btn.setMinimumHeight(48)
-            btn.setFont(QFont("Arial", 18, QFont.Bold))
+            btn.setMinimumSize(220, 220)
+            btn.setFont(QFont("Arial", 20, QFont.Bold))
+            btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #fff;
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #00ff99, stop:1 #00b894);
                     color: #000;
-                    border-radius: 16px;
-                    padding: 12px 0;
-                    font-size: 18px;
+                    border-radius: 32px;
+                    font-size: 22px;
                     font-weight: bold;
+                    border: 4px solid #fff;
+                    box-shadow: 0px 8px 24px #00ff9955;
                 }
                 QPushButton:hover {
-                    background: #00ff99;
-                    color: #000;
+                    background: #fff;
+                    color: #00b894;
+                    border: 4px solid #00ff99;
                 }
             """)
             btn.clicked.connect(lambda checked, n=name: self.open_test_page(n))
-            btn_layout.addWidget(btn)
+            btn_grid.addWidget(btn, i // 2, i % 2, Qt.AlignCenter)
             self.buttons.append(btn)
-        overlay_layout.addLayout(btn_layout)
+        overlay_layout.addLayout(btn_grid)
+
+        # --- ECG Wave GIF at the Bottom ---
+        overlay_layout.addStretch(1)
+        ecg_gif_label = QLabel()
+        ecg_gif_label.setAlignment(Qt.AlignCenter)
+        ecg_movie = QMovie("ecgwave.gif")
+        ecg_gif_label.setMovie(ecg_movie)
+        ecg_movie.setScaledSize(QSize(400, 60))  # Adjust width/height as needed
+        ecg_movie.start()
+        overlay_layout.addWidget(ecg_gif_label, alignment=Qt.AlignCenter)
+        overlay_layout.addSpacing(10)
 
         # --- Make overlay fill the window ---
         overlay.setGeometry(0, 0, self.width(), self.height())
