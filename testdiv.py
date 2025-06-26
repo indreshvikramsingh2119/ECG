@@ -15,8 +15,8 @@ import time
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Button
 import numpy as np
-from db_data import init_db, save_user, validate_user
-from firebase_auth import sign_up, sign_in, save_user_info
+from db_data import init_db, save_user, validate_user, get_user_by_email
+from firebase_auth import sign_up, sign_in, save_user_info, get_firebase_user_info
 import webbrowser
 import requests
 
@@ -443,7 +443,6 @@ class AuthDialog(QDialog):
                 }
                 save_user_info(local_id, user_data)
                 # Save to local DB (including password for local validation)
-                from db_data import save_user
                 save_user(
                     local_id, email, name,
                     phone=full_phone, age=age, gender=gender, address=address, profile_pic=profile_pic, password=password
@@ -452,15 +451,39 @@ class AuthDialog(QDialog):
                 QMessageBox.information(self, "Success", "Sign Up successful!")
                 self.toggle_mode()
         else:
-            # Validate from local DB only
-            from db_data import validate_user
+            # Try local DB first
             user = validate_user(email, password)
-            if not user:
-                QMessageBox.warning(self, "Error", "Invalid email or password!")
-            else:
+            if user:
                 self.logged_in_name = user[2] if user else email
                 QMessageBox.information(self, "Success", "Sign In successful!")
                 self.accept()
+            else:
+                # Try Firebase if not found locally
+                result = sign_in(email, password)
+                if "error" in result:
+                    QMessageBox.warning(self, "Error", "Invalid email or password!")
+                else:
+                    local_id = result["localId"]
+                    user_info = get_firebase_user_info(local_id)
+                    if user_info and "name" in user_info:
+                        name = user_info["name"]
+                    else:
+                        name = email
+                    # Save to local DB for next time
+                    save_user(
+                        local_id,
+                        email,
+                        name,
+                        phone=user_info.get("phone", "") if user_info else "",
+                        age=user_info.get("age", "") if user_info else "",
+                        gender=user_info.get("gender", "") if user_info else "",
+                        address=user_info.get("address", "") if user_info else "",
+                        profile_pic=user_info.get("profile_pic", "") if user_info else "",
+                        password=password
+                    )
+                    self.logged_in_name = name
+                    QMessageBox.information(self, "Success", "Sign In successful!")
+                    self.accept()
 
 # --- Serial Reader ---
 class SerialECGReader:
