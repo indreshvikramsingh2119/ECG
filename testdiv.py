@@ -403,11 +403,11 @@ class LiveLeadWindow(QWidget):
     def update_plot(self):
         data = self.data_source()
         if data and len(data) > 0:
-            if len(data) < self.buffer_size:
-                pad = [data[0]] * (self.buffer_size - len(data))
-                data = pad + data
-            centered = np.array(data) - np.mean(data)
-            self.line.set_ydata(centered)
+            plot_data = np.full(self.buffer_size, np.nan)
+            n = min(len(data), self.buffer_size)
+            centered = np.array(data[-n:]) - np.mean(data[-n:])
+            plot_data[-n:] = centered
+            self.line.set_ydata(plot_data)
             self.canvas.draw_idle()
 
 # --- Test Page ---
