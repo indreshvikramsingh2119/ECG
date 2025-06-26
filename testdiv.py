@@ -1031,6 +1031,8 @@ class MainMenu(QWidget):
             btn.clicked.connect(lambda checked, n=name: self.open_test_page(n))
             btn_grid.addWidget(btn, i // 2, i % 2, Qt.AlignCenter)
             self.buttons.append(btn)
+        for btn in self.buttons:
+            btn.hide()
         overlay_layout.addLayout(btn_grid)
 
         # --- ECG Wave GIF at the Bottom ---
@@ -1057,11 +1059,15 @@ class MainMenu(QWidget):
                 self.user_label.setText(f"Welcome, {user_name}!")
                 self.guest_btn.hide()
                 self.signout_btn.show()
+                for btn in self.buttons:
+                    btn.show()
                 
     def sign_out(self):
         self.user_label.setText("")
         self.guest_btn.show()
         self.signout_btn.hide()
+        for btn in self.buttons:
+            btn.hide()
 
     def resizeEvent(self, event):
         self.bg_label.setPixmap(self.bg_pixmap.scaled(
