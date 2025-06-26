@@ -22,3 +22,10 @@ def sign_in(email, password):
     payload = {"email": email, "password": password, "returnSecureToken": True}
     r = requests.post(url, json=payload)
     return r.json()
+
+def get_firebase_user_info(local_id):
+    db_url = f"https://ecg-authentication-70659.firebaseio.com/users/{local_id}.json"
+    r = requests.get(db_url)
+    if r.status_code == 200:
+        return r.json()
+    return None
