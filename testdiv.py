@@ -6,17 +6,17 @@ from PyQt5.QtWidgets import (
     QComboBox, QGroupBox, QFileDialog, QStackedWidget, QStackedLayout, QGridLayout, QSizePolicy,
     QDialog, QLineEdit, QFormLayout, QMessageBox, QInputDialog
 )
-from PyQt5.QtGui import QPixmap, QFont, QMovie, QRegExpValidator, QPainter, QPainterPath
+from PyQt5.QtGui import QPixmap, QFont, QMovie, QRegExpValidator, QPainter, QPainterPath, QIcon
 from PyQt5.QtCore import Qt, QTimer, QSize, QRegExp
-from PyQt5.QtWidgets import QGraphicsBlurEffect
+from PyQt5.QtWidgets import QGraphicsBlurEffect, QToolButton
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import time
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Button
 import numpy as np
-from db_data import init_db, save_user
-from firebase_auth import sign_up, sign_in
+from db_data import init_db, save_user, validate_user
+from firebase_auth import sign_up, sign_in, save_user_info
 import webbrowser
 import requests
 
@@ -26,7 +26,7 @@ class AuthDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Guest Login")
-        self.setFixedSize(750, 750)
+        self.setFixedSize(800, 800)
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #000, stop:1 #00ff99);
@@ -73,11 +73,12 @@ class AuthDialog(QDialog):
             layout.addWidget(icon_label)
 
         # Title
-        title = QLabel("Guest Login")
-        title.setFont(QFont("Arial", 22, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        self.title = QLabel("Guest Login")
+        self.title.setFont(QFont("Arial", 22, QFont.Bold))
+        self.title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.title)
         
+        # Avatar label
         self.avatar_label = QLabel()
         self.avatar_label.setFixedSize(100, 100)
         self.avatar_label.setAlignment(Qt.AlignCenter)
@@ -134,43 +135,122 @@ class AuthDialog(QDialog):
         layout.addWidget(self.avatar_label, alignment=Qt.AlignCenter)
 
         # Form fields
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setVerticalSpacing(16)
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("Name")
+        self.phone = QLineEdit()
+        self.phone.setPlaceholderText("Phone Number")
+        digit_validator = QRegExpValidator(QRegExp(r'^\d{0,15}$'))
+        self.phone.setValidator(digit_validator)
+        self.age = QLineEdit()
+        self.age.setPlaceholderText("Age")
+        self.gender = QComboBox()
+        self.gender.addItems(["M", "F", "Others", "Prefer not to say"])
+        
+        self.gender.setStyleSheet("""
+            QComboBox {
+                background: #222;
+                color: #fff;
+                border: 2px solid #00ff99;
+                border-radius: 10px;
+                padding: 8px 12px;
+                font-size: 16px;
+            }
+            QComboBox QAbstractItemView {
+                background: #222;
+                color: #fff;
+                selection-background-color: #00ff99;
+                selection-color: #000;
+            }
+        """)
+        
+        self.address = QLineEdit()
+        self.address.setPlaceholderText("Address")
         self.email = QLineEdit()
+        self.email.setPlaceholderText("Email")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        self.password.setPlaceholderText("Password")
         self.password2 = QLineEdit()
         self.password2.setEchoMode(QLineEdit.Password)
-        form.addRow("Email:", self.email)
-        form.addRow("Password:", self.password)
-
-        self.name = QLineEdit()
-        self.name_row_added = False
+        self.password2.setPlaceholderText("Confirm Password")
         
-        # Country code combo
+        # --- Eye button for password ---
+        self.password_eye = QToolButton(self.password)
+        self.password_eye.setIcon(QIcon("eye.png"))  # Use your eye icon file
+        self.password_eye.setCheckable(True)
+        self.password_eye.setCursor(Qt.PointingHandCursor)
+        self.password_eye.setStyleSheet("QToolButton { border: none; padding: 0px; }")
+        self.password_eye.setFixedSize(24, 24)
+        self.password_eye.move(self.password.rect().right() - 28, (self.password.height() - 24) // 2)
+        self.password_eye.clicked.connect(self.toggle_password_visibility)
+        self.password.resizeEvent = lambda event: self.password_eye.move(self.password.rect().right() - 28, (self.password.height() - 24) // 2)
+        self.password_eye.setIcon(QIcon("eye.png"))
+
+        # --- Eye button for confirm password ---
+        self.password2_eye = QToolButton(self.password2)
+        self.password2_eye.setIcon(QIcon("eye.png"))
+        self.password2_eye.setCheckable(True)
+        self.password2_eye.setCursor(Qt.PointingHandCursor)
+        self.password2_eye.setStyleSheet("QToolButton { border: none; padding: 0px; }")
+        self.password2_eye.setFixedSize(24, 24)
+        self.password2_eye.move(self.password2.rect().right() - 28, (self.password2.height() - 24) // 2)
+        self.password2_eye.clicked.connect(self.toggle_password2_visibility)
+        self.password2.resizeEvent = lambda event: self.password2_eye.move(self.password2.rect().right() - 28, (self.password2.height() - 24) // 2)
+        self.password2_eye.setIcon(QIcon("eye.png"))
+        
         self.country_code = QComboBox()
         self.country_code.addItems([
             "+91 (India)", "+1 (USA)", "+44 (UK)", "+61 (Australia)", "+81 (Japan)", "+49 (Germany)", "+86 (China)", "+971 (UAE)"
         ])
         self.country_code.setFixedWidth(130)
         
-        # Phone number field (digits only)
-        self.phone = QLineEdit()
-        self.phone.setPlaceholderText("Phone Number")
-        digit_validator = QRegExpValidator(QRegExp(r'^\d{0,15}$'))  # Up to 15 digits, digits only
-        self.phone.setValidator(digit_validator)
-        self.age = QLineEdit()
-        self.age.setPlaceholderText("Age")
-        self.gender = QComboBox()
-        self.gender.addItems(["M", "F", "Not Applicable"])
-        self.address = QLineEdit()
-        self.address.setPlaceholderText("Address")
+        self.country_code.setStyleSheet("""
+            QComboBox {
+                background: #222;
+                color: #fff;
+                border: 2px solid #00ff99;
+                border-radius: 10px;
+                padding: 8px 12px;
+                font-size: 16px;
+            }
+            QComboBox QAbstractItemView {
+                background: #222;
+                color: #fff;
+                selection-background-color: #00ff99;
+                selection-color: #000;
+            }
+        """)
+        
         self.profile_pic_path = None
 
-        form_widget = QWidget()
-        form_widget.setLayout(form)
-        layout.addWidget(form_widget)
+        # --- Form Layout ---
+        self.form = QFormLayout()
+        self.form.setLabelAlignment(Qt.AlignRight)
+        self.form.setVerticalSpacing(16)
+        self.form_widget = QWidget()
+        self.form_widget.setLayout(self.form)
+        layout.addWidget(self.form_widget)
+        
+        # Add all fields ONCE in sign up order
+        
+        self.label_name = QLabel("Name:")
+        self.label_phone = QLabel("Phone:")
+        self.label_age = QLabel("Age:")
+        self.label_gender = QLabel("Gender:")
+        self.label_address = QLabel("Address:")
+        self.label_email = QLabel("Email:")
+        self.label_password = QLabel("Password:")
+        self.label_password2 = QLabel("Confirm Password:")
+
+        self.phone_widget = self.create_phone_widget()
+        self.form.addRow(self.label_name, self.name)
+        self.form.addRow(self.label_phone, self.phone_widget)
+        self.form.addRow(self.label_age, self.age)
+        self.form.addRow(self.label_gender, self.gender)
+        self.form.addRow(self.label_address, self.address)
+        self.form.addRow(self.label_email, self.email)
+        self.form.addRow(self.label_password, self.password)
+        self.form.addRow(self.label_password2, self.password2)
 
         # Action buttons
         self.action_btn = QPushButton("Sign In")
@@ -184,7 +264,7 @@ class AuthDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.is_signup = False
-        self.form = form
+        self.setup_form()
         
     def create_phone_widget(self):
         phone_row = QHBoxLayout()
@@ -193,37 +273,64 @@ class AuthDialog(QDialog):
         phone_widget = QWidget()
         phone_widget.setLayout(phone_row)
         return phone_widget
+    
+    def setup_form(self):
+    # Hide all sign up fields and their labels by default
+        for label, field in [
+            (self.label_name, self.name),
+            (self.label_phone, self.phone_widget),
+            (self.label_age, self.age),
+            (self.label_gender, self.gender),
+            (self.label_address, self.address),
+            (self.label_password2, self.password2)
+        ]:
+            label.setVisible(self.is_signup)
+            field.setVisible(self.is_signup)
 
-    def toggle_mode(self):
-        self.is_signup = not self.is_signup
+        # Show only email and password (and their labels) always
+        self.label_email.setVisible(True)
+        self.email.setVisible(True)
+        self.label_password.setVisible(True)
+        self.password.setVisible(True)
+
         if self.is_signup:
+            self.title.setText("Register User")
             self.setWindowTitle("Register User")
             self.action_btn.setText("Sign Up")
             self.switch_btn.setText("Already Registered?")
-            if not self.name_row_added:
-                self.form.insertRow(1, "Name:", self.name)
-                
-                phone_row = QHBoxLayout()
-                phone_row.addWidget(self.country_code)
-                phone_row.addWidget(self.phone)
-                phone_widget = QWidget()
-                phone_widget.setLayout(phone_row)
-
-                self.form.insertRow(2, "Phone:", self.create_phone_widget())
-                
-                self.form.insertRow(3, "Age:", self.age)
-                self.form.insertRow(4, "Gender:", self.gender)
-                self.form.insertRow(5, "Address:", self.address)
-                self.form.insertRow(7, "Confirm Password:", self.password2)
-                self.name_row_added = True
         else:
+            self.title.setText("Guest Login")
             self.setWindowTitle("Guest Login")
             self.action_btn.setText("Sign In")
             self.switch_btn.setText("Register User?")
-            if self.name_row_added:
-                for _ in range(6):
-                    self.form.removeRow(1)
-                self.name_row_added = False
+            
+    def toggle_password_visibility(self):
+        if self.password_eye.isChecked():
+            self.password.setEchoMode(QLineEdit.Normal)
+            self.password_eye.setIcon(QIcon("eye-off.png"))  # Use a closed-eye icon
+        else:
+            self.password.setEchoMode(QLineEdit.Password)
+            self.password_eye.setIcon(QIcon("eye.png"))
+
+    def toggle_password2_visibility(self):
+        if self.password2_eye.isChecked():
+            self.password2.setEchoMode(QLineEdit.Normal)
+            self.password2_eye.setIcon(QIcon("eye-off.png"))
+        else:
+            self.password2.setEchoMode(QLineEdit.Password)
+            self.password2_eye.setIcon(QIcon("eye.png"))
+
+    def toggle_mode(self):
+        self.is_signup = not self.is_signup
+        self.setup_form()
+        # Optionally clear all fields when switching
+        self.name.clear()
+        self.phone.clear()
+        self.age.clear()
+        self.address.clear()
+        self.email.clear()
+        self.password.clear()
+        self.password2.clear()
                 
     def upload_profile_pic(self, event=None):
         path, _ = QFileDialog.getOpenFileName(self, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg)")
@@ -308,7 +415,7 @@ class AuthDialog(QDialog):
                 QMessageBox.warning(self, "Error", "Passwords do not match!")
                 return
             name = self.name.text().strip()
-            country_code = self.country_code.currentText().split()[0]  # e.g., "+91"
+            country_code = self.country_code.currentText().split()[0]
             phone = self.phone.text().strip()
             full_phone = f"{country_code}{phone}"
             age = self.age.text().strip()
@@ -318,27 +425,40 @@ class AuthDialog(QDialog):
             if not name or not phone or not age or not address:
                 QMessageBox.warning(self, "Error", "Please fill all fields.")
                 return
+            # Firebase sign up
             result = sign_up(email, password)
             if "error" in result:
                 QMessageBox.warning(self, "Error", result["error"]["message"])
             else:
-                # Save user with all details
+                local_id = result["localId"]
+                # Save to Firebase DB
+                user_data = {
+                    "email": email,
+                    "name": name,
+                    "phone": full_phone,
+                    "age": age,
+                    "gender": gender,
+                    "address": address,
+                    "profile_pic": profile_pic
+                }
+                save_user_info(local_id, user_data)
+                # Save to local DB (including password for local validation)
+                from db_data import save_user
                 save_user(
-                    result["localId"], email, name,
-                    phone=full_phone, age=age, gender=gender, address=address, profile_pic=profile_pic
+                    local_id, email, name,
+                    phone=full_phone, age=age, gender=gender, address=address, profile_pic=profile_pic, password=password
                 )
                 self.logged_in_name = name
                 QMessageBox.information(self, "Success", "Sign Up successful!")
-                self.accept()
+                self.toggle_mode()
         else:
-            result = sign_in(email, password)
-            if "error" in result:
-                QMessageBox.warning(self, "Error", result["error"]["message"])
+            # Validate from local DB only
+            from db_data import validate_user
+            user = validate_user(email, password)
+            if not user:
+                QMessageBox.warning(self, "Error", "Invalid email or password!")
             else:
-                # You may want to fetch the user's name from your DB here
-                from db_data import get_user_by_email
-                user = get_user_by_email(email)
-                self.logged_in_name = user[3] if user else email  # user[3] is name
+                self.logged_in_name = user[2] if user else email
                 QMessageBox.information(self, "Success", "Sign In successful!")
                 self.accept()
 
