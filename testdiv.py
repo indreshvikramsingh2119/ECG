@@ -3,7 +3,7 @@ import serial
 import serial.tools.list_ports
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QGroupBox, QFileDialog, QStackedWidget, QGridLayout, QSizePolicy,
+    QComboBox, QGroupBox, QFileDialog, QStackedWidget, QStackedLayout, QGridLayout, QSizePolicy,
     QDialog, QLineEdit, QFormLayout, QMessageBox, QInputDialog
 )
 from PyQt5.QtGui import QPixmap, QFont, QMovie, QRegExpValidator, QPainter, QPainterPath
@@ -413,11 +413,11 @@ class LiveLeadWindow(QWidget):
 # --- Test Page ---
 class ECGTestPage(QWidget):
     LEADS_MAP = {
-        "Lead II ECG Test": ["Lead II"],
-        "Lead III ECG Test": ["Lead III"],
-        "7 Lead ECG Test": ["V1", "V2", "V3", "V4", "V5", "V6", "Lead II"],
+        "Lead II ECG Test": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
+        "Lead III ECG Test": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
+        "7 Lead ECG Test": ["V1", "V2", "V3", "V4", "V5", "V6", "II"],
         "12 Lead ECG Test": ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"],
-        "ECG Live Monitoring": ["Lead II"]
+        "ECG Live Monitoring": ["II"]
     }
 
     LEAD_COLORS = {
@@ -439,16 +439,75 @@ class ECGTestPage(QWidget):
         lead = self.leads[idx]
         def get_lead_data():
             return self.data[lead]
-        # Assign a color for the lead
         color = self.LEAD_COLORS.get(lead, "#00ff99")
-        win = LiveLeadWindow(lead, get_lead_data, buffer_size=self.buffer_size, color=color)
-        win.show()
-        # Keep a reference so it doesn't get garbage collected
-        if not hasattr(self, "_live_windows"):
-            self._live_windows = []
-        self._live_windows.append(win)
+
+        # Stop previous timer if exists
+        if hasattr(self, '_detailed_timer') and self._detailed_timer is not None:
+            self._detailed_timer.stop()
+            self._detailed_timer.deleteLater()
+            self._detailed_timer = None
+
+        # Remove previous layout and widgets from detailed_widget
+        old_layout = self.detailed_widget.layout()
+        if old_layout is not None:
+            # Remove all widgets from the old layout
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+            # Remove the old layout from the widget
+            QWidget().setLayout(old_layout)  # Detach the layout from the widget
+
+        # Create new layout for detailed_widget
+        layout = QVBoxLayout()
+        # Back button
+        back_btn = QPushButton("Back")
+        back_btn.setFixedHeight(40)
+        back_btn.setStyleSheet("background:#00ff99; color:#000; font-weight:bold; border-radius:10px;")
+        back_btn.clicked.connect(lambda: self.page_stack.setCurrentIndex(0))
+        layout.addWidget(back_btn, alignment=Qt.AlignLeft)
+        # Plot
+        buffer_size = 300
+        fig = Figure(facecolor='#000')
+        ax = fig.add_subplot(111)
+        ax.set_facecolor('#000')
+        ax.set_xlim(0, buffer_size)
+        ax.set_ylim(-500, 500)
+        line, = ax.plot([0]*buffer_size, color=color, lw=2)
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        self.detailed_widget.setLayout(layout)
+        self.page_stack.setCurrentIndex(1)
+
+        # Timer for updating the detailed plot
+        self._detailed_timer = QTimer(self)
+        def update_detailed_plot():
+            data = get_lead_data()
+            plot_data = np.full(buffer_size, np.nan)
+            n = min(len(data), buffer_size)
+            if n > 0:
+                centered = np.array(data[-n:]) - np.mean(data[-n:])
+                plot_data[-n:] = centered
+                line.set_ydata(plot_data)
+                ymin = np.nanmin(plot_data) - 50
+                ymax = np.nanmax(plot_data) + 50
+                if ymin == ymax:
+                    ymin, ymax = -500, 500
+                ax.set_ylim(ymin, ymax)
+                canvas.draw_idle()
+        self._detailed_timer.timeout.connect(update_detailed_plot)
+        self._detailed_timer.start(100)
+
     def __init__(self, test_name, stacked_widget):
         super().__init__()
+        self.grid_widget = QWidget()
+        self.detailed_widget = QWidget()
+        self.page_stack = QStackedLayout()
+        self.page_stack.addWidget(self.grid_widget)
+        self.page_stack.addWidget(self.detailed_widget)
+        self.setLayout(self.page_stack)
+
         self.test_name = test_name
         self.leads = self.LEADS_MAP[test_name]
         self.buffer_size = 80
@@ -527,10 +586,10 @@ class ECGTestPage(QWidget):
         self.ecg_plot_btn.clicked.connect(lambda: run_ecg_live_plot(port='/cu.usbserial-10', baudrate=9600, buffer_size=100))
 
         # --- Combine menu and main content ---
-        main_hbox = QHBoxLayout(self)
+        main_hbox = QHBoxLayout(self.grid_widget)
         main_hbox.addWidget(menu_frame)
         main_hbox.addLayout(main_vbox)
-        self.setLayout(main_hbox)
+        self.grid_widget.setLayout(main_hbox)
 
         # --- Style ---
         self.setStyleSheet("""
@@ -628,8 +687,11 @@ class ECGTestPage(QWidget):
             self.axs.append(ax)
         self.plot_area.setLayout(grid)
 
+        def make_expand_lead(idx):
+            return lambda event: self.expand_lead(idx)
+
         for i, canvas in enumerate(self.canvases):
-            canvas.mpl_connect('button_press_event', lambda event, idx=i: self.expand_lead(idx))
+            canvas.mpl_connect('button_press_event', make_expand_lead(i))
 
     def start_acquisition(self):
         port = self.port_combo.currentText()
@@ -1056,19 +1118,43 @@ class MainApp(QMainWindow):
         self.stacked_widget.addWidget(self.menu)    # index 1
         self.stacked_widget.setCurrentWidget(self.splash)
 
+        # --- Add page stack for grid and detailed views ---
+        self.page_stack = QStackedLayout()
+        self.grid_widget = QWidget()
+        self.detailed_widget = QWidget()
+        self.page_stack.addWidget(self.grid_widget)      # index 0: grid
+        self.page_stack.addWidget(self.detailed_widget)  # index 1: detailed
+        self.setLayout(self.page_stack)
+
+        # --- For debugging: show the raw data in a separate window ---
+        self.debug_window = None
+
+        # --- Start a timer to print memory usage every 10 seconds ---
+        self.memory_timer = QTimer()
+        self.memory_timer.timeout.connect(self.print_memory_usage)
+        self.memory_timer.start(10000)  # 10 seconds
+
+    def print_memory_usage(self):
+        import os
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem_info = process.memory_info()
+        # Print RSS (Resident Set Size) and VMS (Virtual Memory Size)
+        print(f"Memory Usage - RSS: {mem_info.rss / 1024**2:.2f} MB, VMS: {mem_info.vms / 1024**2:.2f} MB")
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     stacked = QStackedWidget()
 
-    # Replace YourMainPage with your actual main page class
     main_page = MainMenu(stacked)  
     splash = SplashScreen(stacked, main_page)
 
     stacked.addWidget(splash)
     stacked.addWidget(main_page)
     stacked.setCurrentWidget(splash)
-    stacked.resize(900, 600)
+    stacked.resize(1200, 900)
     stacked.show()
+
     sys.exit(app.exec_())
 
     # --- ECG Live Plot Function ---
